@@ -45,21 +45,11 @@ wy_id<-read.csv("WaterYear_ID.csv")
 # check data
 wy_id
 
-###!!!!!!!!!!!!!!!!!!!!!!!!!###
-###-=-=- SELECT INPUTS -=-=-###
-###!!!!!!!!!!!!!!!!!!!!!!!!!###
-
-### CHANGE UL TO KL AND RUN FROM HERE ONCE FOR EACH ###
-
-# set types of lows (upper level [1] or kona [2] lows)
-types = c("upper_lows", "kona_lows")
-# select low type to analyze
-type = types[2]
-cat('\n', type, 'being analyzed')
-
-# set type of low to use (upper level [UL] or kona [KL] lows)
-day_type = all_lows$KL
-dur_type = all_lows$KL_DUR
+# enso data of strong el nino/la nina years
+elnino<-data.frame(c(1983, 1988, 1998), c(5, 26, 8), rep(3, 3))
+names(elnino)<-c("YEAR", "ul_ELNINO", "kl_ELNINO")
+lanina<-data.frame(c(1989, 2000, 2011), c(31, 32, 44), rep(20, 3))
+names(lanina)<-c("YEAR", "ul_LANINA", "kl_LANINA")
 
 #############################
 ##### OVERVIEW ANALYSIS #####
@@ -80,9 +70,27 @@ cat('\n and on average ~', ul_per_yr, 'upper level and ~', kl_per_yr, 'kona lows
 ### LOWS PER YEAR ###
 
 # determine the number of days with lows
-low_days<-all_lows[which(day_type == 1), ]
+ul_days<-all_lows[which(all_lows$UL == 1), ]
+kl_days<-all_lows[which(all_lows$KL == 1), ]
 # determine the number of low events
-low_events<-all_lows[which(dur_type != 0), ]
+ul_events<-all_lows[which(all_lows$UL_DUR != 0), ]
+kl_events<-all_lows[which(all_lows$KL_DUR != 0), ]
+
+###!!!!!!!!!!!!!!!!!!!!!!!!!###
+###-=-=- SELECT INPUTS -=-=-###
+###!!!!!!!!!!!!!!!!!!!!!!!!!###
+
+### CHANGE UL TO KL 7 TIMES BELOW AND RUN FROM HERE to LINE 130 ONCE FOR EACH TYPE ###
+
+# set types of lows (upper level [1] or kona [2] lows)
+types = c("upper_lows", "kona_lows")
+# select low type to analyze
+type = types[2]
+cat('\n', type, 'being analyzed')
+
+# set type of low to use (upper level [UL] or kona [KL] lows)
+low_days<-kl_days
+low_events<-kl_events
 
 # loop through and analyze days and events per water year (October 1 - September 30)
 for (wy in 1:length(wy_id$YEAR)) { # set wy = 2 for debugging
@@ -112,68 +120,88 @@ for (wy in 1:length(wy_id$YEAR)) { # set wy = 2 for debugging
 }
 
 # rename dataset column headers
-names(wy_days)<-c("YEAR", "DAYS")
-names(wy_events)<-c("YEAR", "EVENTS")
+names(wy_days)<-c("YEAR", "kl_DAYS")
+names(wy_events)<-c("YEAR", "kl_EVENTS")
 
 # merge datasets by year
 low_occ<-merge(wy_days, wy_events, by = "YEAR")
 
+# save for each upper level lows and kona lows
+ul_low_occ<-low_occ
+kl_low_occ<-low_occ
+# merge ul and kl low occurrences once both are run
+low_occ<-merge(ul_low_occ, kl_low_occ, by = "YEAR")
+
 # write output file for each low type of occurences per water year
-write.csv(low_occ, file = paste0(outDir, type, "_occurrences.csv"))
+write.csv(low_occ, file = paste0(outDir, "all_low_occurrences.csv"))
 
-# calculate fitted linear models for days and events
-lm_days<-lm(low_occ$DAYS~low_occ$YEAR)
-summary(lm_days)
-lm_events<-lm(low_occ$EVENTS~low_occ$YEAR)
-summary(lm_events)
-# calculate fitted polynomial regressions
-los_days<-loess(low_occ$DAYS~low_occ$YEAR)
-summary(los_days)
-los_events<-loess(low_occ$EVENTS~low_occ$YEAR)
-summary(los_events)
+# combine enso data with low occurrences
+low_occ<-merge(low_occ, elnino, by = "YEAR", all = TRUE)
+low_occ<-merge(low_occ, lanina, by = "YEAR", all = TRUE)
 
-### CHANGE UL TO KL IN MAIN AND SET YLIM() ###
+# function to create barplots for low occurrences
+low_bp<-function(fig_name, l_days, l_events, main_name, ymax, nino, nina) {
+  # calculate fitted linear models for days and events
+  lm_days<-lm(l_days~low_occ$YEAR)
+  lm_events<-lm(l_events~low_occ$YEAR)
+  # calculate fitted polynomial regressions
+  los_days<-loess(l_days~low_occ$YEAR)
+  los_events<-loess(l_events~low_occ$YEAR)
+  
+  # summarize linear regressions [1:11] for days and events
+  d_rsq<-round(as.numeric(summary(lm_days)[8]), 4)          #r-squared
+  d_pval<-round(as.numeric(summary(lm_days)[[4]][8]), 4)    #p-value
+  e_rsq<-round(as.numeric(summary(lm_events)[8]), 4)        #r-squared
+  e_pval<-round(as.numeric(summary(lm_events)[[4]][8]), 4)  #p-value
+  
+  # create blank tiff files to save image outputs
+  tiff(paste0(outDir, fig_name), res = 300, units = "in", 
+       pointsize = 12, width = 10, height = 10, compression = "lzw")
 
-# create blank tiff files to save image outputs
-tiff(paste0(outDir, type, "_barplot.tif"), res = 300, units = "in", 
-     pointsize = 12, width = 10, height = 10, compression = "lzw")
+  
+  # create barlots of number of days and events of lows
+  day_bp<-barplot(l_days, ylim = c(0, ymax), border = "red",
+                  names.arg = 1981:2014, las = 2, cex.names = 0.75,
+                  xlab = "Year", ylab = "Occurrences",
+                  main = main_name, beside = TRUE)
+  # lines(day_bp, predict(los_days), lwd = 2, lty = "dashed", col = "red")
+  lines(day_bp, predict(lm_days), lwd = 1, col = "red", lty = "dashed")
+  par(new = TRUE)  # add plot
+  event_bp<-barplot(l_events, ylim = c(0, ymax), border = "blue",
+                    las = 2, xlab = "", ylab = "", main = "")  
+  # lines(event_bp, predict(los_events), lwd = 2, lty = "dashed", col = "blue")
+  lines(event_bp, predict(lm_events), lwd = 1, col = "blue", lty = "dashed")
+  
+  # add text for upper level low and kona low counts
+  text(day_bp, l_days, labels = l_days, pos = 3, cex = 0.75, col = "red")
+  text(event_bp, l_events, labels = l_events, pos = 3, cex = 0.75, col = "blue")
+  
+  # add enso events
+  text(event_bp, nino, labels = "*", cex = 2, col = "darkorange")
+  text(event_bp, nina, labels = "*", cex = 2, col = "forestgreen")
+  
+  # add r-square and p-values
+  mtext(paste0("r^2 = ", d_rsq, "   p-value = ", d_pval), 
+        side = 3, padj = 0, col = "red", cex = 1)
+  mtext(paste0("r^2 = ", e_rsq, "   p-value = ", e_pval), 
+        side = 3, padj = 1, col = "blue", cex = 1)
+  
+  # add legend to plot
+  legend("topleft", legend = c("Days", "Events", "Strong El Nino", "Strong La Nina"), 
+         bty = "n", pch = c(15, 15, 8, 8),
+         col = c("red", "blue", "darkorange", "forestgreen"))
+  
+  # save plot 
+  dev.off()
+  
+}
 
-# create barlots of number of days and events of lows
-day_bp<-barplot(low_occ$DAYS, ylim = c(0, 30), border = "red",
-                names.arg = 1981:2014, las = 2, cex.names = 0.75,
-                xlab = "Year", ylab = "Occurrences",
-                main = "Number of Kona Low Days and Events")
-lines(day_bp, predict(los_days), lwd = 2, lty = "dashed", col = "red")
-lines(day_bp, predict(lm_days), lwd = 3, col = "red")
-par(new = TRUE)
-event_bp<-barplot(low_occ$EVENTS, ylim = c(0, 30), border = "blue",
-                  las = 2, xlab = "", ylab = "", main = "")
-lines(event_bp, predict(los_events), lwd = 2, lty = "dashed", col = "blue")
-lines(event_bp, predict(lm_events), lwd = 3, col = "blue")
-legend("topright", c("Days", "Events"), bty = "n",
-       col = c("red", "blue"), pch = 15) 
-
-# save plot 
-dev.off()
-
-# create blank tiff files to save image outputs
-tiff(paste0(outDir, type, "_timeseries.tif"), res = 300, units = "in", 
-     pointsize = 12, width = 10, height = 10, compression = "lzw")
-
-# plot occurrences of low days and events over time
-plot(low_occ$YEAR, low_occ$DAYS, ylim = c(0, 30), type = "o", pch = 19, col = "red",
-     xlab = "Year", ylab = "Occurrences", 
-     main = "Occurrence of Kona Low Days and Events")
-abline(lm_days, lwd = 3, col = "red")
-par(new = TRUE)
-plot(low_occ$YEAR, low_occ$EVENTS, ylim = c(0, 30), type = "o", pch = 19, col = "blue",
-     xlab = "", ylab = "", main = "")
-abline(lm_events, lwd = 3, col = "blue")
-legend("topright", c("Days", "Events"), bty = "n",
-       col = c("red", "blue"), pch = 19) 
-
-# save plot 
-dev.off()
+ul_plots<-low_bp("upper_lows_barplot.tif", low_occ$UL_DAYS, low_occ$UL_EVENTS, 
+                 "Number of Upper Level Low Days and Events",
+                 60, low_occ$ul_ELNINO, low_occ$ul_LANINA)
+kl_plots<-low_bp("kona_lows_barplot.tif", low_occ$KL_DAYS, low_occ$KL_EVENTS, 
+                 "Number of Kona Low Days and Events", 
+                 35, low_occ$kl_ELNINO, low_occ$kl_LANINA)
 
 ### LOWS PER MONTH ###
 
@@ -199,13 +227,21 @@ tiff(paste0(outDir, "days_per_month_barplot.tif"), res = 300, units = "in",
      pointsize = 12, width = 10, height = 10, compression = "lzw")
 
 # create barlots of number of days and events of lows
-month_days_bp<-barplot(ul_days_per_month$COUNT, ylim = c(0, 200), border = "red",
-                       names.arg = 1:12, las = 1, cex.names = 0.75,
-                       xlab = "Month", ylab = "Number of Days with Low Occurrences",
-                       main = "Low Days per Month")
+ul_days_bp<-barplot(ul_days_per_month$COUNT, ylim = c(0, 200), border = "red",
+                    names.arg = 1:12, las = 1, cex.names = 0.75,
+                    xlab = "Month", ylab = "Number of Days with Low Occurrences",
+                    main = "Low Days per Month")
 par(new = TRUE)
-event_bp<-barplot(kl_days_per_month$COUNT, ylim = c(0, 200), border = "blue",
-                  las = 2, xlab = "", ylab = "", main = "")
+kl_days_bp<-barplot(kl_days_per_month$COUNT, ylim = c(0, 200), border = "blue",
+                    las = 2, xlab = "", ylab = "", main = "")
+
+# add text for upper level low and kona low counts
+text(ul_days_bp, ul_days_per_month$COUNT, labels = ul_days_per_month$COUNT, 
+     pos = 3, cex = 0.75, col = "red")
+text(kl_days_bp, kl_days_per_month$COUNT, labels = kl_days_per_month$COUNT, 
+     pos = 3, cex = 0.75, col = "blue")
+
+# add legend to plot
 legend("topleft", c("Upper Level", "Kona Lows"), bty = "n",
        col = c("red", "blue"), pch = 15) 
 
@@ -217,15 +253,51 @@ tiff(paste0(outDir, "events_per_month_barplot.tif"), res = 300, units = "in",
      pointsize = 12, width = 10, height = 10, compression = "lzw")
 
 # create barlots of number of days and events of lows
-month_days_bp<-barplot(ul_events_per_month$COUNT, ylim = c(0, 50), border = "red",
-                       names.arg = 1:12, las = 1, cex.names = 0.75,
-                       xlab = "Month", ylab = "Number of Low Occurrences",
-                       main = "Low Events per Month")
+ul_events_bp<-barplot(ul_events_per_month$COUNT, ylim = c(0, 50), border = "red",
+                      names.arg = 1:12, las = 1, cex.names = 0.75,
+                      xlab = "Month", ylab = "Number of Low Occurrences",
+                      main = "Low Events per Month")
 par(new = TRUE)
-event_bp<-barplot(kl_events_per_month$COUNT, ylim = c(0, 50), border = "blue",
-                  las = 2, xlab = "", ylab = "", main = "")
+kl_events_bp<-barplot(kl_events_per_month$COUNT, ylim = c(0, 50), border = "blue",
+                      las = 2, xlab = "", ylab = "", main = "")
+
+# add text for upper level low and kona low counts
+text(ul_events_bp, ul_events_per_month$COUNT, labels = ul_events_per_month$COUNT, 
+     pos = 3, cex = 0.75, col = "red")
+text(kl_events_bp, kl_events_per_month$COUNT, labels = kl_events_per_month$COUNT, 
+     pos = 3, cex = 0.75, col = "blue")
+
+# add legend to plot
 legend("topleft", c("Upper Level", "Kona Lows"), bty = "n",
        col = c("red", "blue"), pch = 15) 
+
+# save plot 
+dev.off()
+
+# calculate ratio of low events
+low_occ[, 10:11]<-cbind(low_occ$KL_DAYS/low_occ$UL_DAYS, low_occ$KL_EVENTS/low_occ$UL_EVENTS)
+# replace NaNs from 0/0 
+low_occ[c(1,3),10:11]<-0
+# rename columns
+names(low_occ)[10:11]<-c("d_ratio", "e_ratio")
+
+# create blank tiff files to save image outputs
+tiff(paste0(outDir, "low_ratios.tif"), res = 300, units = "in", 
+     pointsize = 12, width = 12, height = 8, compression = "lzw")
+
+# ratio days and events of upper level lows and kona lows
+plot(low_occ$YEAR, low_occ$d_ratio, ylim = c(-0.25, 1.25),
+     type = 'o', pch = 15, col = "red", lwd = 1.75,
+     main = "Ratio of Upper Level Lows and Kona Low",
+     xlab = "Year", ylab = "Ratio (Kona Lows:Upper Level Lows)")
+par(new = TRUE)
+plot(low_occ$YEAR, low_occ$e_ratio, ylim = c(-0.25, 1.25),
+     type = 'o', pch = 20, col = "blue",
+     main = "", xlab = "", ylab = "")
+
+# add legend to plot
+legend("topright",  c("Number of Days", "Number of Events"), 
+       bty = "n", col = c("red", "blue"), pch = c(15, 19))
 
 # save plot 
 dev.off()
